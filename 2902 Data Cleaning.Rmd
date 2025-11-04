@@ -1,0 +1,620 @@
+---
+title: "2902 Data Cleaning"
+output: html_document
+date: "2025-11-04"
+---
+
+```{r setup, include=FALSE}
+# Your setup here
+library(tidyverse)
+library(knitr)
+library(dplyr)
+library(haven) # install.packages("haven")
+library(ggplot2) 
+library(kableExtra) # devtools::install_github("kupietz/kableExtra")
+library(data.table)
+library(fastDummies) # install.packages("fastDummies") #to create dummies for borough variables
+library(car)
+library(stats)
+knitr::opts_chunk$set(
+	message = FALSE,
+	warning = FALSE,
+	error = TRUE,
+	out.width = "75%"
+)
+library(labelled)
+library(webshot)
+```
+
+
+# Import NNCS Data Set
+
+```{r}
+wd <- "/Users/elliot/Dropbox/0.NYU Wagner/2902_Multiple_Regression/Final Project/Data Sets/" 
+setwd(wd)
+nncs <- read_dta('nncs_data_final - Copy.dta')
+
+
+summary(nncs)
+nncs
+```
+
+# Select Variables of interest
+
+```{r}
+#here I would like to generate a df of variables and numbers so like a table where 
+# https://www.pipinghotdata.com/posts/2022-09-13-the-case-for-variable-labels-in-r/#create-a-data-dictionary
+#uses labelled function to create a data dictionary
+
+#allows save_kable to work
+install_phantomjs()
+```
+
+#Creating a data dictionary
+
+```{r}
+#named variables
+
+#generate_dictionary from labelled
+nncs_dictionary <- nncs |> 
+  generate_dictionary(values = FALSE)
+
+#values = TRUE generates vectors of any factors
+nncs_dictionary2 <- nncs |> 
+  generate_dictionary(values = TRUE)
+
+nncs_dictionary |>
+    kable(
+      col.names = c("Varnum", "Var Name", "Label", "Type", "Number Missing", "LVL1", "LVL2")
+      ) |>
+  kable_styling() |> 
+  save_kable("dictionary.pdf")
+  
+
+
+
+#blank styling data dictionary pdf
+nncs_dictionary |>  
+    kable("html") |> 
+  kable_styling() |> 
+  kable_minimal() |> 
+  save_kable(file = "dictionary3.pdf") 
+
+
+#webshot method  
+  
+webshot::webshot("dictionary2.html", file = "dictionary.pdf", selector = ".lightable-classic", expand = 20)
+  
+
+save_kable(nncs_dictionary_table, "dictionary2.png")
+  
+#no idea  
+  
+nncs_dictionary_table 
+
+kable(matrix(1000, ncol = 5), format = "latex", digits = 2, longtable = TRUE)
+```
+
+#slighty less elegant method of numbering items
+
+```{r, eval = FALSE}
+
+nncs_col_names <- colnames(nncs)
+print(nncs_col_names)
+
+list_length <- length(nncs_col_names)
+
+varnum <- list(1:as.integer(list_length))
+col_vars <- NULL
+
+col_vars <- data.frame(varnum, nncs_col_names)
+#check names of columns
+str(col_vars)
+#rename X1.80
+col_vars <- rename(col_vars, varnum = X1.80)
+      
+#check header
+head(col_vars, n = 20)
+
+```
+
+
+#Variable Selector
+#Uses a vector to select variables of interest by their position in the dictionary table
+#
+
+```{r}
+new_df <- nncs |> data.table()
+variables <- c(1, 2, 3, 4, 5, 6, 19, 20, 21, 22, 23, 25, 27, 29, 30, 31, 32, 33, 34, 35, 36, 41, 42, 43, 44, 53, 55, 56)
+
+nncs_variables <- nncs |> 
+  select(all_of(variables))
+
+head(nncs_variables)
+```
+
+#more data checks
+```{r}
+str(nncs_variables)
+head(nncs_variables)
+```
+
+
+#A Hist that Works
+
+```{r}
+nncs_variables |>  
+  ggplot(aes(x = t_sslow)) + 
+  geom_histogram(binwidth = .25)
+```
+#lappy for Histograms
+
+```{r}
+histplots <- lapply(
+  names(nncs_variables),
+  function(n)
+    ggplot(data = nncs_variables, aes_string(x = n)) +
+    geom_histogram(stat = "count") 
+)
+
+print(histplots)
+
+#some real questions because there is a real weird distribution and a lot of missing data 
+#like something is getting applied wrong? Really weird need to diagnose
+nncs_variables |> ggplot(aes(x = t_pcmove)) + geom_histogram()
+```
+```{r}
+#histplots of some of the weird variables
+
+nncs_variables |> 
+  ggplot(aes(x = "t_pop00")) +
+  geom_histogram(stat = "count")
+
+
+#really really weird how it is reading the function
+nncs_variables |> 
+  ggplot(aes(x = "t_povrty")) +
+  geom_histogram(stat = "count")
+
+
+#gets a big solid bar for x
+nncs_variables |> 
+  ggplot(aes(x = "t_povrty")) +
+  stat_count()
+```
+
+#lapply that gets real values for numbered variables
+```{r}
+#need to drop variables with character names, function is not iterating through them corectly
+#need to recreate numvars list
+
+#sapplys a function that filters out not number variables
+numvars2 <- nncs_variables[,sapply(nncs_variables, is.numeric)]
+
+identical(numvars, numvars2)
+```
+
+
+```{r}
+#create a list of histplots 
+histplots2 <- lapply(
+  names(numvars),
+  function(n)
+    ggplot(data = numvars, aes_string(x = n)) +
+    geom_histogram() 
+)
+
+print(histplots2)
+```
+
+```{r}
+
+#create a list of histplots 
+
+histplots3 <- lapply(
+  names(numvars2),
+  function(n)
+    ggplot(data = numvars2, aes_string(x = n)) +
+    geom_histogram() 
+)
+
+print(histplots3)
+```
+
+#lapply create city and county scatters
+
+#add small legend
+##add small legend is literally so sick it decreases the legend size for big graphs with lots of categories and factors
+##https://stackoverflow.com/questions/52297978/decrease-overal-legend-size-elements-and-text thanks to pogibas for the answer
+
+```{r}
+addSmallLegend <- function(myPlot, pointSize = 0.5, textSize = 3, spaceLegend = 0.1) {
+    myPlot +
+        guides(shape = guide_legend(override.aes = list(size = pointSize)),
+               color = guide_legend(override.aes = list(size = pointSize))) +
+        theme(legend.title = element_text(size = textSize), 
+              legend.text  = element_text(size = textSize),
+              legend.key.size = unit(spaceLegend, "lines"))
+}
+
+# Apply on original plot
+t_pcwhite <- nncs_variables |> 
+    ggplot(aes(x= t_pcwhte, y = t_denied, color = cit_name)) +
+    geom_point()
+
+t_pcwhite
+
+addSmallLegend(myPlot = t_pcwhite)
+
+```
+
+
+#create denied city graphs
+
+```{r}
+#create denied city
+denied_city <- lapply(
+  names(nncs_variables),
+  function(n)
+    ggplot(data = nncs_variables, aes_string(x = n, y = "t_denied", color = "cit_name")) +
+    geom_point() +
+    labs(
+        x = as.character(n),
+        y = "# Mortgages Denied",
+        caption = "Data is broken up by city names",
+        color = "City") +
+    ggtitle(paste("Mortgage Denial vs", as.character(n), "by cities"))
+)
+
+
+
+denied_city_small <- addSmallLegend(myPlot = denied_city[[1]])
+
+#where lapplys literally have changed my life
+
+denied_city_small <- lapply(denied_city, addSmallLegend) 
+
+print(denied_city_small)
+
+pdf("Mortgage Denial Bivariate_Cities.pdf")
+
+# Make plots
+print(denied_city_small)
+
+dev.off()
+```
+
+#Lapply graphs for county
+
+```{r}
+#lapply to generate county level bivariates
+
+denied_county <- lapply(
+  names(nncs_variables),
+  function(n)
+    ggplot(data = nncs_variables, aes_string(x = n, y = "t_denied", color = "t_county")) +
+    geom_point() +
+    labs(
+        x = as.character(n),
+        y = "# Mortgages Denied",
+        caption = "Data is broken up by county id",
+        color = "County") +
+    ggtitle(paste("Mortgage Denial vs", as.character(n), "by counties"))
+)
+
+
+denied_county_small <- lapply(denied_county, addSmallLegend) 
+
+print(denied_county_small)
+
+pdf("Mortgage Denial Bivariate_Counties.pdf")
+
+# Make plots
+print(denied_county_small)
+
+dev.off()
+
+# this is the same output as denied cities. tract lvl relationships do not 
+# change even though the grouping does. will impact when we start factoring and doing fixed effects
+```
+
+#Creating a summary and specifications
+
+```{r}
+
+#creating a specification and summary
+#how many distinct counties? data set says 63 but is that accurate?
+
+spec1 <- nncs_variables |> group_by(t_county) |> 
+                  summarise(
+                    pop = sum(t_pop00),
+                    state = first(stusab),
+                    low_wage = mean(t_sslow),
+                    hi_wage = mean(t_hiwage),
+                    unemployed = mean(t_unemwa),
+                    female_headed = mean(t_femhed),
+                    hs_grad = mean(t_hsgrad),
+                    renters = mean(t_pcrent),
+                    income = mean(t_percap),
+                    rent = mean(t_gsrent),
+                    home_value = mean(t_hsvalu))
+
+head(arrange(spec1, desc(rent)), 10)
+
+head(arrange(nncs_variables, t_pcrent), 10)
+```
+
+#import census data and name counties
+```{r}
+
+#pull fips data for county name, state fips code, county code
+#need to match state and county on nncs_variables but can't immediately
+#same fips can be in multiple states. need a state fips code not in data set, to match
+
+fips <- readxl::read_excel("/Users/elliot/Dropbox/0.NYU Wagner/2902_Multiple_Regression/Maps/US_FIPS_Codes.xls", skip = 1)
+
+#import state abbreviations to match state code to nncs variables
+
+st_abrvs <- read_csv("/Users/elliot/Dropbox/0.NYU Wagner/2902_Multiple_Regression/Final Project/Data Sets/data-map-state-abbreviations.csv")
+
+st_abrvs <- st_abrvs |> rename("State" = "Name")
+                               
+
+head(fips)
+head(st_abrvs)
+
+#joins and appends state abbreviation onto fips
+joined_fips <- left_join(fips, st_abrvs, "State") 
+
+joined_fips <- joined_fips |> 
+                rename("t_county" = "FIPS County",
+                       "stusab" = "Abbreviation") |> 
+                select(c("County Name", "t_county", "stusab")
+                )
+
+head(joined_fips)
+
+head(nncs_variables)
+
+#match st_abbrev and stusab, match fips_county and t_county, only interested in county name
+
+nncs_variables_named <- left_join(nncs_variables, joined_fips, by = c("stusab", "t_county"))
+
+head(nncs_variables_named)
+
+#could run this later in the rmd and then redo all of the generation or just insert it further upstream. leaning towards latter bc then I don't have to generate everything from scratch for every different variable we run.
+#also a note to clean up the variable names they are pretty hard to interpret in the imported data set from 2902. use some of the stuff from spec1 to rename them further upstream
+
+
+```
+
+#oldgraph to use as a template
+
+```{r}
+
+#oldgraph to use as a template
+ghg_usa |> 
+      ggplot(aes(x = year, y = ghg_emit, color = category), caption) + 
+      geom_point() +
+      geom_smooth(se = TRUE) +
+  labs(title = "Greenhouse Gas Emissions, USA, 1990-2020",
+        x = "Year",
+        y = "Greenhouse Gas Emissions (kt)",
+        caption = "Note: GHG are in kilotons of CO2 equivalent, including LULUCF",
+        color = "Category") +
+  scale_x_continuous(breaks = seq(1990, 2020, 5)) +  
+  theme_minimal() +  
+  scale_color_discrete(name = "Category") +
+  facet_wrap(~ category, scales = "free")
+```
+
+#more code that works
+
+```{r}
+lapply(
+  names(iris)[1:4], 
+  function(n) 
+    ggplot(data = iris, aes_string(y = n, x = "Species")) + 
+    geom_boxplot()
+)
+```
+
+#a less elegant way of making a list than data dictionary
+
+
+
+
+#Below this beware
+
+```{r, eval=FALSE}
+
+histmake <- function(df) {
+   ggplot(df, aes(x= values)) + 
+  geom_histogram()
+ # return(result) # Optional: explicitly return a value
+}
+
+lapply(nncs_variables, histmake)
+```
+
+
+```{r, eval = FALSE}
+
+#honestly no idea some overcomplicated code from the internet
+ls <- list("mtcars" = mtcars, "mtcars2" = mtcars[1L:25L, ])
+OTA_plottitle <- "Some Title Text"
+library(ggplot2)
+lapply(names(nncs_variables), \(i) {
+  ggplot(nncs_variables[[i]], aes(wt, qsec)) + 
+    geom_point() +
+    labs(title = paste(i, OTA_plottitle))
+  ggsave(filename = paste0("plot_", i, ".png"), plot = last_plot())
+})
+```
+
+```{r, eval= FALSE}
+library(ggplot2)
+#' param xvar character name of the y variable
+histgen <- function(xvar){
+    select_if(data, class())
+    ggplot(nncs_variables, aes_(x=as.name(xvar))) +
+        geom_histogram(stat = "count")
+}
+
+names <- names(nncs_variables)
+
+lapply(nncs_variables, histgen)
+
+  
+histgen <- function(xvar){
+    ggplot(aes_(x=as.name(xvar))) +
+        geom_histogram(stat = "bin")
+  }
+  
+
+
+dim(numvars)
+plots <- lapply(
+  names(nncs_variables), 
+  function(n)
+      filter(class(n) == "dbl"),
+      ggplot(nncs_variables, aes_string(x=n)) +
+        geom_histogram())
+```
+```{r}
+
+lapply(
+names(FilteredProps1)[4:18], 
+function(n) 
+ggplot(data = FilteredProps1, aes_string(x = n, y = "Evict_Share", color="Eviction.Cat")) + 
+geom_point()+
+stat_smooth(geom='line', method=lm, se=FALSE, fullrange=TRUE, alpha=0.6)+
+stat_cor(method = "pearson")+
+theme_classic()+
+theme(legend.position = c(0.87, 0.9))+
+labs(color="Evictor Rank Category")+
+ylab("Eviction Rate (%)")
+)
+
+
+
+
+```
+
+```{r, eval=FALSE}
+RecVar <- CMrecruitdat[,c("Termed", "Req.Open.To.System.Entry", "Req.Open.To.Hire", "Tenure")]
+
+BP <- function (RecVar){
+  require(ggplot2)
+  ggplot(RecVar, aes_string(x="Termed", y=RecVar, fill="Termed"))+
+     geom_boxplot()+
+     guides(fill=false)
+}
+
+lapply(names(RecVar), FUN=BP)
+```
+
+
+```{r, eval= FALSE}
+plot_data_column = function (.data, .column) {
+  ggplot2::ggplot(data= .data, ggplot2::aes(y=!!dplyr::sym(.column),x = Petal.Width)) +
+    ggplot2::geom_line() +
+    ggplot2::geom_hline(yintercept = .data %>% 
+                          dplyr::pull(!!dplyr::sym(.column)) %>% 
+                          mean(), 
+                        color="red")+
+    ggplot2::ggtitle(.column) +
+    ggplot2::theme_minimal()
+}
+
+plots2 <- names(nncs_variables) %>% 
+  purrr::map(~plot_data_column(.data = nncs_variables, .column = name(nncs_variables))
+```
+
+```{r}
+lapply(
+  names(iris)[1:4], 
+  function(n) 
+    ggplot(data = iris, aes_string(y = n, x = "Species")) + 
+    geom_boxplot()
+)
+```
+
+
+
+```{r}
+mylist <- list(a=1,b=2,c=3)
+myfxn <- function(var1,var2){
+  var1*var2
+}
+var2 <- 2
+
+sapply(mylist,myfxn,var2=var2)
+```
+
+
+```{r, eval = FALSE}
+nncs_col_names <- colnames(nncs)
+print(nncs_col_names)
+
+varnum <- list(1:80)
+col_vars <- NULL
+
+col_vars <- data.frame(varnum, nncs_col_names)
+
+col_vars <- rename(col_vars, varnum = X1.80)
+      
+# df <-df |> mutate(
+#   newcol = paste(X1.80, nncs_col_names)
+# ) 
+
+summarise(col_vars, n = 20)
+
+```
+
+
+
+
+```{r}
+# Create a sample list
+nncs_col_names |> length()
+
+# Number to add
+df[ "nn" ] <- lapply( X = df[ "Chicago_Has" ]
+                               , FUN = function(i) paste( "Chicago_Has", i, sep = " " )
+                               )
+
+# Add the number to each item using lapply
+new_list <- lapply(nncs_col_names, function(x) x + number_to_add)
+
+# Print the new list
+print(new_list)
+```
+
+```{r}
+# create data
+df <- data.frame(
+  Chicago_Has = c("Lou Malnati's", "Wrigley Field", "CTA" )
+  , Seattle_Has = c("Piroshky Piroshky", "Safeco Field", "KCMT" )
+  , stringsAsFactors = FALSE
+)
+
+# paste column name into each element 
+# within each column
+df[ "Chicago_Has" ] <- lapply( X = df[ "Chicago_Has" ]
+                               , FUN = function(i) paste( "Chicago_Has", i, sep = " " )
+                               )
+df[ "Seattle_Has" ] <- lapply( X = df[ "Seattle_Has" ]
+                               , FUN = function(i) paste( "Seattle_Has", i, sep = " ")
+)
+
+# examine the desired result of the data frame
+df
+
+#                 Chicago_Has                   Seattle_Has
+# 1 Chicago_Has Lou Malnati's Seattle_Has Piroshky Piroshky
+# 2 Chicago_Has Wrigley Field      Seattle_Has Safeco Field
+# 3           Chicago_Has CTA              Seattle_Has KCMT
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
